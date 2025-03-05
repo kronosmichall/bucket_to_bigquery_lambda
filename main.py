@@ -1,25 +1,43 @@
+import json
+from typing import Any
 import functions_framework
+from cloudevents.http import CloudEvent
+from google.cloud import bigquery, storage
 
-@functions_framework.http
-def app(request):
-    """HTTP Cloud Function.
-    Args:
-        request (flask.Request): The request object.
-        <https://flask.palletsprojects.com/en/1.1.x/api/#incoming-request-data>
-    Returns:
-        The response text, or any set of values that can be turned into a
-        Response object using `make_response`
-        <https://flask.palletsprojects.com/en/1.1.x/api/#flask.make_response>.
-    """
-    request_json = request.get_json(silent=True)
-    request_args = request.args
+PROJECT_ID = "mindful-hull-450810-e9"
+DATASET_ID = "finnhub"
+TABLE_ID = "finnhub_table"
 
-    if request_json and 'name' in request_json:
-        name = request_json['name']
-    elif request_args and 'name' in request_args:
-        name = request_args['name']
-    else:
-        name = 'World'
+def insert_json_text_to_bq(bq_client: Any, text: str, file_name: str) -> None:
+    try:
+        json_data = json.loads(text)
+        # BQ requires list of objects
+        if isinstance(json_data, dict): json_data = [json_data]
         
+        errors = bq_client.insert_rows_json(f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}", json_data)
+        
+        if errors:
+            print("BigQuery Insert Errors:", errors)
+        else:
+            print("Data successfully inserted into BigQuery.")
+    except Exception as e:
+        print(f"Error processing file {file_name}: {e}")
+        
+@functions_framework.cloud_event
+def app(event: CloudEvent) -> None:
+    """Triggered when a file is created in GCS. Reads JSON and loads into BigQuery."""
+    bq_client = bigquery.Client(project=PROJECT_ID)
+    storage_client = storage.Client(project=PROJECT_ID)
+
+    event_data = event.data
+    bucket_name = event_data["bucket"]  
+    file_name = event_data["name"]
     
-    return f'Hello {name}!'
+    print(f"Processing file: gs://{bucket_name}/{file_name}")
+
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(file_name)
+    json_content = blob.download_as_text()
+    
+    insert_json_text_to_bq(bq_client, json_content, file_name)
+    

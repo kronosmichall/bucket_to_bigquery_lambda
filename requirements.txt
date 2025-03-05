@@ -1,1 +1,5 @@
 functions-framework
+cloudevents
+google-cloud-bigquery
+pandas
+google-cloud-storage
